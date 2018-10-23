@@ -1,5 +1,6 @@
 import React, { PureComponent } from 'react';
 import styled from 'styled-components';
+import is from 'styled-is';
 
 const HEX = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
@@ -12,7 +13,15 @@ const Header = styled.div`
     background: #ffedc7;
 `;
 
-const Line = styled.div``;
+const Line = styled.div`
+    ${is('green')`
+        background: #ebffeb;
+    `};
+
+    ${is('red')`
+        background: #ffd9d9;
+    `};
+`;
 
 const LineNumber = styled.span`
     display: inline-block;
@@ -24,6 +33,18 @@ const LineNumber = styled.span`
 `;
 
 const Cell = styled.span`
+    ${is('same')`
+        color: #888;
+    `};
+
+    ${is('red')`
+        background: red;
+    `};
+
+    ${is('green')`
+        background: green;
+    `};
+
     &::after {
         content: ' ';
     }
@@ -36,28 +57,50 @@ const Splitter = styled.span`
 
 export default class FileView extends PureComponent {
     state = {
-        bytes: null,
+        buffers: null,
     };
 
     onFileChange = e => {
-        const reader = new FileReader();
+        const files = e.target.files;
 
-        reader.addEventListener('load', () => {
-            const bytes = new Uint8Array(reader.result);
+        if (!files || files.length === 0) {
+            return;
+        }
 
-            this.setState({
-                bytes,
+        const buffers = [];
+
+        for (let file of files) {
+            const reader = new FileReader();
+
+            reader.addEventListener('load', () => {
+                buffers.push(new Uint8Array(reader.result));
+                check();
             });
-        });
 
-        reader.readAsArrayBuffer(e.target.files[0]);
+            reader.readAsArrayBuffer(file);
+        }
+
+        const check = () => {
+            if (buffers.length === files.length) {
+                this.setState({
+                    buffers,
+                });
+            }
+        };
     };
 
-    renderLine(bytes, start, count) {
+    renderCells(bytes, start, count, diffArray, isSecond) {
         const cells = [];
+        let allSame = true;
 
         for (let i = 0; i < count && start + i < bytes.length; i++) {
             const byte = bytes[start + i];
+
+            const isSame = diffArray && byte === diffArray[start + i];
+
+            if (allSame) {
+                allSame = isSame;
+            }
 
             const high = Math.floor(byte / 16);
             const low = byte - high * 16;
@@ -66,14 +109,50 @@ export default class FileView extends PureComponent {
                 cells.push(<Splitter key={100 + i} />);
             }
 
-            cells.push(<Cell key={i}>{HEX[high] + HEX[low]}</Cell>);
+            cells.push(
+                <Cell key={i} same={isSame} red={isSecond && !isSame} green={!isSecond && !isSame}>
+                    {HEX[high] + HEX[low]}
+                </Cell>
+            );
         }
 
-        return cells;
+        return {
+            cells,
+            allSame,
+        };
+    }
+
+    renderLine(buffers, line, start, count) {
+        const bytes = buffers[0];
+        const bytes2 = buffers[1];
+
+        const { cells, allSame } = this.renderCells(bytes, start, count, bytes2, false);
+
+        const lines = [
+            <Line key={line} green={!allSame}>
+                <LineNumber>{line}</LineNumber>
+                {cells}
+            </Line>,
+        ];
+
+        if (!allSame) {
+            const { cells } = this.renderCells(bytes2, start, count, bytes, true);
+
+            lines.push(
+                <Line key={line + '_kek'} red>
+                    <LineNumber>{line}</LineNumber>
+                    {cells}
+                </Line>
+            );
+        }
+
+        return lines;
     }
 
     renderBytes() {
-        const { bytes } = this.state;
+        const { buffers } = this.state;
+
+        const bytes = buffers[0];
 
         const LINE_WIDTH = 32;
 
@@ -81,12 +160,7 @@ export default class FileView extends PureComponent {
         const lines = [];
 
         for (let line = 0; line < linesCount; line++) {
-            lines.push(
-                <Line key={line}>
-                    <LineNumber>{line}</LineNumber>
-                    {this.renderLine(bytes, line * LINE_WIDTH, LINE_WIDTH)}
-                </Line>
-            );
+            lines.push(...this.renderLine(buffers, line, line * LINE_WIDTH, LINE_WIDTH));
         }
 
         return (
@@ -108,12 +182,12 @@ export default class FileView extends PureComponent {
     }
 
     render() {
-        const { bytes } = this.state;
+        const { buffers } = this.state;
 
         return (
             <div>
-                <input type="file" onChange={this.onFileChange} />
-                {bytes ? this.renderBytes() : null}
+                <input type="file" multiple onChange={this.onFileChange} />
+                {buffers ? this.renderBytes() : null}
             </div>
         );
     }
